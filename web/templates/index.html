@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ethereum Transactions</title>
+</head>
+<body>
+    <h1>Transactions for Ethereum Address</h1>
+    <ul>
+        {% for tx in transactions['result'] %}
+            <li>Block: {{ tx['blockNumber'] }}, From: {{ tx['from'] }}, To: {{ tx['to'] }}, Value: {{ tx['value'] }} wei</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
