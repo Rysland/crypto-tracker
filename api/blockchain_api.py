@@ -1,12 +1,13 @@
 import requests
-from api.endpoints import get_endpoint
+from api.endpoints import BlockchainEndpoints
 
 class BlockchainAPI:
     """Класс для взаимодействия с блокчейн-эндпоинтами."""
     
     def __init__(self, blockchain_name):
         """Инициализация с указанием имени блокчейна."""
-        self.endpoint = get_endpoint(blockchain_name)
+        endpoints = BlockchainEndpoints()  # Инициализация класса для эндпоинтов
+        self.endpoint = endpoints.get_endpoint(blockchain_name)
         if not self.endpoint:
             raise ValueError(f"Эндпоинт для блокчейна '{blockchain_name}' не найден.")
 
