@@ -5,7 +5,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from api.coinmarketcap_api import CoinMarketCapAPI
-from api.token_filter import filter_tokens_by_contract
+from api.endpoints import BlockchainEndpoints
 from utils import save_tokens_to_cache, load_tokens_from_cache
 from telegram import Bot
 
@@ -35,30 +35,44 @@ async def filter_and_notify(tokens):
     """
     logging.info("Начинаю фильтрацию токенов для уведомлений.")
     interesting_tokens = []
+    endpoints = BlockchainEndpoints()
 
     for token in tokens:
-        # Пример фильтрации: токены с контрактами и определёнными условиями
         contract = token.get("contract")
-        if not contract:
+        platform = token["platform"]["name"]
+
+        if not contract or platform not in endpoints.endpoints:
             continue
 
-        # Условия для определения "интересных" токенов (замените на ваши критерии)
-        if token['platform']['name'] == 'Ethereum' and token['symbol'].startswith('A'):
-            interesting_tokens.append(token)
+        # Получение данных о держателях и остатке токенов
+        holders = endpoints.get_holders(platform, contract)
+        supply_data = endpoints.get_token_supply(platform, contract)
 
-    logging.info(f"Найдено интересных токенов: {len(interesting_tokens)}")
+        # Получение 5 крупнейших держателей
+        top_holders = holders[:5]
+        avg_price = endpoints.get_avg_purchase_price(
+            platform, contract, [holder["address"] for holder in top_holders]
+        )
 
-    # Отправка уведомлений с задержкой
-    for token in interesting_tokens:
+        # Формирование сообщения
         message = (
             f"Найден интересный токен:\n"
             f"Название: {token['name']}\n"
             f"Символ: {token['symbol']}\n"
             f"Контракт: {token['contract']}\n"
-            f"Платформа: {token['platform']['name']}"
+            f"Платформа: {platform}\n\n"
+            f"Крупные держатели:\n"
+            + "\n".join(
+                [f"{holder['address']}: {holder['percent']}% ({holder['amount']} токенов)" for holder in top_holders]
+            )
+            + f"\nСредняя цена покупки у крупных держателей: {avg_price}\n\n"
+            f"Оставшиеся токены для торговли:\n"
+            f"{supply_data.get('remaining', 'неизвестно')} ({supply_data.get('percent', 'неизвестно')}%)"
         )
+
+        interesting_tokens.append(token)
         await send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
-        await asyncio.sleep(2)  # Задержка в 2 секунды между сообщениями
+        await asyncio.sleep(10)  # Задержка в 10 секунд между сообщениями
 
 async def analyze_tokens():
     """
