@@ -1,138 +1,104 @@
-import json
 import logging
 import sys
 import time
-from api.token_filter import filter_tokens_by_contract
 from api.coinmarketcap_api import CoinMarketCapAPI
-from api.blockchain_api import BlockchainAPI
-from api.notifications import notify_about_token
+from api.token_filter import filter_tokens_by_contract
+from utils import save_tokens_to_cache, load_tokens_from_cache
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-CACHE_FILE = "tokens_cache.json"
-
-def load_tokens_from_cache():
-    """
-    Загружает токены из локального кэша.
-    :return: Список токенов.
-    """
-    try:
-        with open(CACHE_FILE, "r") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        logging.error("Файл кэша не найден. Выполните обновление с помощью команды 'update_tokens'.")
-        return []
-    except json.JSONDecodeError:
-        logging.error("Ошибка чтения файла кэша. Выполните обновление с помощью команды 'update_tokens'.")
-        return []
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def update_tokens_cache():
     """
-    Обновляет кэш токенов с CoinMarketCap.
+    Обновляет токены, запрашивая данные с CoinMarketCap.
     """
-    cmc_api = CoinMarketCapAPI()
-    tokens = []
-
     try:
+        cmc_api = CoinMarketCapAPI()
+        tokens = []
+
         start = 1
         limit = 100
-        batch_size = 50  # Группировка токенов для одного запроса
-        all_ids = []
 
         while start <= 1000:
             logging.info(f"Запрашиваю токены с {start} по {start + limit - 1}")
             batch = cmc_api.get_top_tokens(start=start, limit=limit)
+
             if not batch:
-                logging.error("Ошибка получения данных от CoinMarketCap.")
+                logging.warning("Не удалось получить токены на данном этапе.")
                 break
 
-            tokens.extend(batch)
-            all_ids.extend([token["id"] for token in batch])
+            # Добавляем идентификаторы и платформы токенов
+            for token in batch:
+                if token is None:  # Проверка на None
+                    logging.warning(f"Получен пустой токен: {token}")
+                    continue
+
+                token_id = token.get("id")
+                name = token.get("name")
+                symbol = token.get("symbol")
+                platform = token.get("platform", {})
+                contract = platform.get("token_address") if platform else None
+
+                # Убедимся, что основные данные существуют
+                if not (token_id and name and symbol):
+                    logging.warning(f"Пропущен токен из-за отсутствия данных: {token}")
+                    continue
+
+                tokens.append({
+                    "id": token_id,
+                    "name": name,
+                    "symbol": symbol,
+                    "platform": platform,
+                    "contract": contract
+                })
+
             start += limit
-            time.sleep(2)  # Задержка между запросами
+            time.sleep(2)  # Задержка для API
 
-        # Группируем запросы для получения информации о контрактах
-        for i in range(0, len(all_ids), batch_size):
-            batch_ids = all_ids[i:i + batch_size]
-            token_infos = cmc_api.get_tokens_info(batch_ids)
-            for token in tokens:
-                if str(token["id"]) in token_infos:
-                    token["platforms"] = token_infos[str(token["id"])].get("platforms", {})
-
-        with open(CACHE_FILE, "w") as file:
-            json.dump(tokens, file, indent=4)
-        logging.info(f"Успешно обновлено токенов: {len(tokens)}")
-
+        if tokens:
+            save_tokens_to_cache(tokens)
+            logging.info(f"Токены успешно обновлены. Всего: {len(tokens)}")
+        else:
+            logging.warning("Не удалось обновить токены.")
     except Exception as e:
-        logging.error(f"Ошибка при обновлении кэша токенов: {e}")
+        logging.error(f"Ошибка обновления токенов: {e}")
 
-def analyze_holders(contract, blockchain):
+def analyze_tokens():
     """
-    Анализ холдеров токена.
-    :param contract: Адрес контракта токена.
-    :param blockchain: Название блокчейна.
-    :return: Список холдеров с их процентами владения.
+    Анализирует токены, фильтруя их по контрактам.
     """
-    try:
-        blockchain_api = BlockchainAPI(blockchain)
-        holders = blockchain_api.get_holders(contract)
-        return holders
-    except Exception as e:
-        logging.error(f"Ошибка анализа холдеров для токена {contract} в блокчейне {blockchain}: {e}")
-        return None
-
-def main():
-    """
-    Основная логика анализа токенов.
-    """
-    if len(sys.argv) > 1 and sys.argv[1] == "update_tokens":
-        logging.info("Обновление токенов...")
-        update_tokens_cache()
-        return
-
-    logging.info("Запуск программы...")
-
-    # Загрузка токенов из кэша
+    logging.info("Запуск анализа токенов...")
     tokens = load_tokens_from_cache()
+
     if not tokens:
-        logging.error("Токены не найдены. Выполните обновление с помощью команды 'update_tokens'.")
+        logging.error("Токены не найдены. Сначала выполните 'update_tokens'.")
         return
 
     logging.info(f"Загружено токенов из кэша: {len(tokens)}")
     filtered_tokens = filter_tokens_by_contract(tokens)
-    if not filtered_tokens:
-        logging.error("Фильтрация токенов не дала результатов. Проверьте список поддерживаемых блокчейнов.")
+
+    logging.info(f"Отфильтровано токенов: {len(filtered_tokens)}")
+
+    # Здесь можно добавить дополнительные действия с фильтрованными токенами
+    for token in filtered_tokens:
+        logging.info(f"Токен {token['name']} ({token['symbol']}) контракт: {token['contract']}")
+
+def main():
+    """
+    Основной запуск программы.
+    """
+    if len(sys.argv) < 2:
+        logging.error("Не указана команда. Используйте 'update_tokens' или 'analyze_tokens'.")
         return
 
-    logging.info(f"Отфильтровано токенов для анализа: {len(filtered_tokens)}")
+    command = sys.argv[1]
 
-    for token in filtered_tokens:
-        logging.info(f"Анализ токена: {token['name']} ({token['contract']}) на блокчейне {token['blockchain']}")
-
-        holders = analyze_holders(token["contract"], token["blockchain"])
-        if not holders:
-            logging.warning(f"Холдеры не найдены для токена {token['name']}")
-            continue
-
-        # Анализ концентрации
-        percentages = [holder["percentage"] for holder in holders]
-        percentages.sort(reverse=True)
-
-        if sum(percentages[:10]) > 50:
-            notify_about_token(
-                token["name"], token["contract"], token["blockchain"], holders[:10], "ОЧЕНЬ ВАЖНЫЙ"
-            )
-        elif sum(percentages[:100]) > 50:
-            notify_about_token(
-                token["name"], token["contract"], token["blockchain"], holders[:100], "ВАЖНЫЙ"
-            )
-        elif sum(percentages[:1000]) > 40:
-            notify_about_token(
-                token["name"], token["contract"], token["blockchain"], holders[:1000], "НОРМ"
-            )
-
-    logging.info("Анализ завершён.")
+    if command == "update_tokens":
+        update_tokens_cache()
+    elif command == "analyze_tokens":
+        analyze_tokens()
+    else:
+        logging.error(f"Неизвестная команда: {command}")
 
 if __name__ == "__main__":
     main()
