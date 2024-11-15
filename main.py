@@ -2,7 +2,7 @@ import json
 import logging
 import sys
 import time
-from api.token_filter import filter_tokens_by_blockchain
+from api.token_filter import filter_tokens_by_contract
 from api.coinmarketcap_api import CoinMarketCapAPI
 from api.blockchain_api import BlockchainAPI
 from api.notifications import notify_about_token
@@ -31,26 +31,34 @@ def update_tokens_cache():
     """
     Обновляет кэш токенов с CoinMarketCap.
     """
-    try:
-        cmc_api = CoinMarketCapAPI()
-        tokens = []
+    cmc_api = CoinMarketCapAPI()
+    tokens = []
 
-        # Пошаговая загрузка по 100 токенов
+    try:
         start = 1
         limit = 100
+        batch_size = 50  # Группировка токенов для одного запроса
+        all_ids = []
+
         while start <= 1000:
             logging.info(f"Запрашиваю токены с {start} по {start + limit - 1}")
             batch = cmc_api.get_top_tokens(start=start, limit=limit)
             if not batch:
                 logging.error("Ошибка получения данных от CoinMarketCap.")
                 break
+
             tokens.extend(batch)
+            all_ids.extend([token["id"] for token in batch])
             start += limit
             time.sleep(2)  # Задержка между запросами
 
-        if not tokens:
-            logging.error("Не удалось получить токены с CoinMarketCap. Проверьте API-ключ и соединение.")
-            return
+        # Группируем запросы для получения информации о контрактах
+        for i in range(0, len(all_ids), batch_size):
+            batch_ids = all_ids[i:i + batch_size]
+            token_infos = cmc_api.get_tokens_info(batch_ids)
+            for token in tokens:
+                if str(token["id"]) in token_infos:
+                    token["platforms"] = token_infos[str(token["id"])].get("platforms", {})
 
         with open(CACHE_FILE, "w") as file:
             json.dump(tokens, file, indent=4)
@@ -92,7 +100,7 @@ def main():
         return
 
     logging.info(f"Загружено токенов из кэша: {len(tokens)}")
-    filtered_tokens = filter_tokens_by_blockchain(tokens)
+    filtered_tokens = filter_tokens_by_contract(tokens)
     if not filtered_tokens:
         logging.error("Фильтрация токенов не дала результатов. Проверьте список поддерживаемых блокчейнов.")
         return
@@ -128,4 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
