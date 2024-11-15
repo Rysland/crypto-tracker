@@ -1,4 +1,9 @@
-from api.blockchain_api import BlockchainAPI
+import sys
+import os
+from api.blockchain_api import BlockchainAPI  # Убедитесь, что этот импорт работает
+
+# Устанавливаем путь для поиска модулей
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '')))
 
 # Список поддерживаемых блокчейнов
 blockchains = [
@@ -9,6 +14,7 @@ blockchains = [
 ]
 
 def test_endpoints():
+    """Функция для тестирования эндпоинтов."""
     for blockchain in blockchains:
         print(f"Тестируем блокчейн: {blockchain}")
         try:
